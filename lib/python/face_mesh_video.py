@@ -30,6 +30,7 @@ with mp_face_mesh.FaceMesh(
         frame_rgba = cv2.cvtColor(frame, cv2.COLOR_HSV2BGR)
         # aplicamos la detección con face mesh
         results = face_mesh.process(frame_rgba)
+        print("Face landmarks: \n", results.multi_face_landmarks)
 
         # para dibujar los puntos encima del video (si es que se detectó un rostro)
         if results.multi_face_landmarks is not None:
@@ -58,6 +59,6 @@ with mp_face_mesh.FaceMesh(
         k = cv2.waitKey(1) & 0xFF
         if k == 27:
             break
-
+    print("aqui toy")
     cap.release()
     cv2.destroyAllWindows()
