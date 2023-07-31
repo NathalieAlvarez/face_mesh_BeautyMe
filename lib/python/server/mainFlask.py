@@ -1,12 +1,14 @@
 # importaciones
 # pip install flask-socketio==5.2.0
-from flask import Flask, render_template, send_from_directory
-from flask_socketio import SocketIO, send, emit
+from flask import Flask, render_template
+from flask_socketio import SocketIO, emit
 
 # importación de librerías
 import cv2
 import mediapipe as mp
 import base64
+from PIL import Image
+import io
 
 # inicializaoms le servidor web
 app = Flask(__name__, static_folder="./templates/static")
@@ -19,13 +21,19 @@ socketio = SocketIO(app)
 def base64_to_image(base64_string):
     # falta perfeccionar esta parte
     imgdata = base64.b64decode(base64_string)
+    # se crea una imagen en la ubicaclion filename
     filename = "some_image.jpg"
     with open(filename, "wb") as f:
         f.write(imgdata)
 
-    # se define la imagen de entrada
-    imageCV2 = cv2.imread("lib\\python\\server\\some_image.jpg")
+    # imageCV2 guarda los datos previamente generados en un formato que cv puede leer
+    imageCV2 = cv2.imread("some_image.jpg")
     return imageCV2
+
+
+# procesa los bytes recibidos desde flutter
+def process_camera_image(image_bytes):
+    return Image.open(io.BytesIO(image_bytes))
 
 
 # function to handle incoming connections from the client.
@@ -39,11 +47,15 @@ def test_connect():
 # function to handle incoming images from the client.
 # This function is called whenever an “image” event is received from the client.
 @socketio.on("image")
-def receive_image(image):
-    print("Recibí una imagen muy bonita")
+def receive_image(base64_image):
+    print("Recibí una imagen muy bonita\n")
+    # print("aqui ta: " + str(base64_image) + " aqui termina\n")
 
     # Decode the base64-encoded image data
-    image = base64_to_image(image)
+    image = base64_to_image(base64_image)
+
+    # recibe una imagen como una lista de bytes y lo convierte en una imagen
+    # image = process_camera_image(base64_image)
 
     print("iniciando proyecto de malla facial")
 
@@ -58,7 +70,7 @@ def receive_image(image):
         min_detection_confidence=0.5,
     ) as face_mesh:
         # se define la imagen de entrada
-        image = cv2.imread("lib\\python\\rostros\\rostro1.jpeg")
+        # image = cv2.imread("lib\\python\\rostros\\rostro1.jpeg")
         # sacamos las dimensiones necesarias de la imagen
         height, width, _ = image.shape
         # traformar la image en RGB, porque así la puede leer mediapipe
@@ -93,6 +105,7 @@ def receive_image(image):
                     ),
                 )
 
+    print(str(results.multi_face_landmarks))
     # Send the processed image back to the client
     emit("processed_image", str(results.multi_face_landmarks))
 
@@ -104,7 +117,6 @@ def receive_image(image):
 def index():
     print("entramos al index ya con una imagen recibida")
     # lo que yo quiero retornar en reaildad es un json o  string de coordenadas
-    # return "hola mundo"
     return render_template("index.html")
 
 
