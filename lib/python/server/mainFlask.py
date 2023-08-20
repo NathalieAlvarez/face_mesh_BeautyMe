@@ -1,6 +1,6 @@
 # importaciones
 # pip install flask-socketio==5.2.0
-from flask import Flask, render_template
+from flask import Flask, render_template, request
 from flask_socketio import SocketIO, emit
 
 # importación de librerías
@@ -9,6 +9,7 @@ import mediapipe as mp
 import base64
 from PIL import Image
 import io
+import numpy as np
 
 # inicializaoms le servidor web
 app = Flask(__name__, static_folder="./templates/static")
@@ -36,6 +37,121 @@ def process_camera_image(image_bytes):
     return Image.open(io.BytesIO(image_bytes))
 
 
+def procesar_imagen(RGBA_image):
+    # Convertir Uint8List a una matriz NumPy
+    np_array = np.array(RGBA_image, dtype=np.uint8)
+
+    # Asegurarse de que la matriz tiene la forma correcta (ancho, alto, canales)
+    # En este caso, asumimos que la imagen es de 4 canales (RGBA)
+    height, width, channels = (int(len(RGBA_image) / 4), 4, 1)
+    np_array = np_array.reshape(height, width, channels)
+
+    return np_array
+
+
+# recibe una lista anidada co los 3 planos de la imagen YUV para transformarlos en RGB usando:
+# https://stackoverflow.com/questions/60729170/python-opencv-converting-planar-yuv-420-image-to-rgb-yuv-array-format
+def YUVtoRGB(yp, up, vp):
+    print("la imagen llegó como lista, pero nada mas")
+
+    # Building the input:
+    ###############################################################################
+    img = cv2.imread("ejemplo.jpg")
+
+    # yuv = cv2.cvtColor(img, cv2.COLOR_BGR2YUV)
+    # y, u, v = cv2.split(yuv)
+
+    # Convert BGR to YCrCb (YCrCb apply YCrCb JPEG (or YCC), "full range",
+    # where Y range is [0, 255], and U, V range is [0, 255] (this is the default JPEG format color space format).
+    yvu = cv2.cvtColor(img, cv2.COLOR_BGR2YCrCb)
+    y, v, u = cv2.split(yvu)
+    print(u)
+    print(u.length())
+
+    # convierte las list en numpy arrays:
+    # y = np.array(yp)
+    upp = np.array(up)
+    print(upp.length())
+    # v = np.array(vp)
+
+    # Downsample U and V (apply 420 format).
+    u = cv2.resize(u, (u.shape[1] // 2, u.shape[0] // 2))
+    v = cv2.resize(v, (v.shape[1] // 2, v.shape[0] // 2))
+
+    # Open In-memory bytes streams (instead of using fifo)
+    f = io.BytesIO()
+
+    # Write Y, U and V to the "streams".
+    f.write(y.tobytes())
+    f.write(u.tobytes())
+    f.write(v.tobytes())
+
+    f.seek(0)
+    ###############################################################################
+
+    # Read YUV420 (I420 planar format) and convert to BGR
+    ###############################################################################
+    data = f.read(
+        y.size * 3 // 2
+    )  # Read one frame (number of bytes is width*height*1.5).
+
+    # Reshape data to numpy array with height*1.5 rows
+    yuv_data = np.frombuffer(data, np.uint8).reshape(y.shape[0] * 3 // 2, y.shape[1])
+
+    # Convert YUV to BGR
+    bgr = cv2.cvtColor(yuv_data, cv2.COLOR_YUV2BGR_I420)
+
+    return bgr
+
+
+# usa un métdo de chatgpt para convertir las 3 listas en un rgb.
+# este método se concentra en la creación de los numpy array
+def YUVtoRGB2(height, width, yp, up, vp):
+    # print("la imagen llegó como lista, pero nada mas")
+    # se agrega un elemento más a la lista para que entre en el rango
+    up.append(0)
+
+    # crea 3 matrices con ceros con el tamaño y dimensiones adecuadas para cada plano
+    y_matrix = np.zeros((height, width), dtype=np.uint8)
+    u_matrix = np.zeros((height // 2, width // 2), dtype=np.uint8)
+    v_matrix = np.zeros((height // 2, width // 2), dtype=np.uint8)
+
+    # llenar las matrices con los datos de las listas
+    # llenado de y_matrix
+    cont = 0
+    for i in range(0, height):
+        for j in range(0, width):
+            y_matrix[i, j] = yp[cont]
+            cont += 1
+
+    # llenado de u_matrix y v_matrix
+    cont = 0
+    for i in range(0, (height // 2)):
+        for j in range(0, (width // 2)):
+            u_matrix[i, j] = up[cont]
+            v_matrix[i, j] = up[cont + 1]
+            cont += 2
+
+    # Crear el numpy array de YUV420
+    yuv420_frame = np.zeros((height + height // 2, width), dtype=np.uint8)
+    yuv420_frame[:height, :] = y_matrix
+    yuv420_frame[height:, : width // 2] = u_matrix
+    yuv420_frame[height:, width // 2 :] = v_matrix
+
+    # se muestra la imagen
+    cv2.imshow("Imagen yuv", yuv420_frame)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+    # convertir el yuv frame en un rgb frame
+    rgb_frame = cv2.cvtColor(yuv420_frame, cv2.COLOR_YUV2RGB_I420)
+
+    # procesos extra de stack overlfow
+    # muestra el
+    # rgb_frame = cv2.cvtColor(yuv420_frame, cv2.COLOR_YUV2BGR_I420)
+    return rgb_frame
+
+
 # function to handle incoming connections from the client.
 # This function is called whenever a client connects to the server.
 @socketio.on("connect")
@@ -47,15 +163,25 @@ def test_connect():
 # function to handle incoming images from the client.
 # This function is called whenever an “image” event is received from the client.
 @socketio.on("image")
-def receive_image(base64_image):
+def receive_image(height, width, yp, up, vp):
     print("Recibí una imagen muy bonita\n")
-    # print("aqui ta: " + str(base64_image) + " aqui termina\n")
+    # print("Received lists1: ", yp)
+    # print("Received lists2: ", up)
+    # print("Received lists3: ", vp)
 
-    # Decode the base64-encoded image data
-    image = base64_to_image(base64_image)
+    # Decode the base64-encoded image data (bueno)
+    # image = base64_to_image(base64_image)
 
     # recibe una imagen como una lista de bytes y lo convierte en una imagen
     # image = process_camera_image(base64_image)
+
+    # np_array = procesar_imagen(RGBA_image)
+
+    # de una vez convierte la List<List<int>> en un RGB
+    # image = YUVtoRGB(yp, up, vp)
+
+    # intenta pasar la imagen yuv a rgb pero con un método sacado de chatgpt
+    image_rgb = YUVtoRGB2(height[0], width[0], yp, up, vp)
 
     print("iniciando proyecto de malla facial")
 
@@ -72,9 +198,10 @@ def receive_image(base64_image):
         # se define la imagen de entrada
         # image = cv2.imread("lib\\python\\rostros\\rostro1.jpeg")
         # sacamos las dimensiones necesarias de la imagen
-        height, width, _ = image.shape
+        # height, width, _ = image.shape
         # traformar la image en RGB, porque así la puede leer mediapipe
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        # image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        # image_rgb = cv2.cvtColor(np_array, cv2.COLOR_RGBA2RGB)
 
         # aplicamos la detección con face mesh
         results = face_mesh.process(image_rgb)
@@ -86,7 +213,7 @@ def receive_image(base64_image):
             for face_landmarks in results.multi_face_landmarks:
                 # face_landmarks son los puntos, mp_face_mesh.FACEMESH_CONTOURS remarca zonas clave como labios y ojos
                 mp_drawing.draw_landmarks(
-                    image,
+                    image_rgb,
                     face_landmarks,
                     mp_face_mesh.FACEMESH_CONTOURS,
                     # características del punto y la línea
@@ -100,10 +227,14 @@ def receive_image(base64_image):
                         circle_radius=1,
                     ),
                     mp_drawing.DrawingSpec(
-                        _,
+                        # _,
                         thickness=1,
                     ),
                 )
+    # se muestra la imagen
+    cv2.imshow("Image", image_rgb)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
 
     print(str(results.multi_face_landmarks))
     # Send the processed image back to the client
